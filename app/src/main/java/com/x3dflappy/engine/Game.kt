@@ -37,6 +37,7 @@ class Game(private val store: SettingsStore, private val host: GameHost) {
 
     companion object {
         const val GRAVITY = -24f
+        const val DESCENT_MULT = 0.8f // rate of descent cut 20% after a flap (falling phase)
         const val FLAP_V = 9.0f
         const val BIRD_R = 0.42f
         const val FLOOR = -3.7f
@@ -140,7 +141,10 @@ class Game(private val store: SettingsStore, private val host: GameHost) {
     }
 
     private fun updatePlaying(dt: Float) {
-        birdVy += GRAVITY * dt
+        // Each flap pops the bird up at full gravity, but the ensuing descent
+        // is gentler — the rate of descent (while falling) is reduced by 20%.
+        val g = if (birdVy <= 0f) GRAVITY * DESCENT_MULT else GRAVITY
+        birdVy += g * dt
         birdY += birdVy * dt
         birdTilt = (birdVy * 4.5f).coerceIn(-70f, 35f)
 
