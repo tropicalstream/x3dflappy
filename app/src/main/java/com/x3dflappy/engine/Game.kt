@@ -13,10 +13,11 @@ interface GameHost {
     fun stopDrone()
 }
 
-class Gate(var z: Float, val gapCenter: Float, val gapHalf: Float) {
+class Gate(var z: Float, val gapCenter: Float, var gapHalf: Float) {
     var passed = false
     var hit = false
     var flash = 0f
+    var blasted = false // a dropping has already opened this gate wider
 }
 
 class Particle {
@@ -27,6 +28,12 @@ class Particle {
 }
 
 class Star(var x: Float, var y: Float, var z: Float)
+
+/** A power-up "dropping" the bird lobs forward to blast the next wall open. */
+class Dropping {
+    var x = 0f; var y = 0f; var z = 0f
+    var vy = 0f
+}
 
 /**
  * X3DFlappy game logic (no GL). A neon creature falls under gravity; each tap
@@ -46,6 +53,9 @@ class Game(private val store: SettingsStore, private val host: GameHost) {
         const val DESPAWN_Z = -12f
         const val WALL_HALF_Z = 0.7f
         const val CAM_Z = -7f
+        const val POWER_SECS = 5f       // power-up duration
+        const val DROP_INTERVAL = 0.22f // seconds between droppings
+        const val DROP_VZ = 9f          // dropping travels forward toward the next wall
     }
 
     var state = GameState.TITLE
@@ -60,6 +70,16 @@ class Game(private val store: SettingsStore, private val host: GameHost) {
     val particles = ArrayList<Particle>()
     private val pool = ArrayDeque<Particle>()
     val stars = ArrayList<Star>()
+
+    // Power-up: every 3..6 walls the bird lobs droppings that blast the next
+    // walls open to double size, for 5 seconds.
+    val droppings = ArrayList<Dropping>()
+    private val dropPool = ArrayDeque<Dropping>()
+    var powerupActive = false; private set
+    var powerupTimer = 0f; private set
+    private var dropTimer = 0f
+    private var gatesSincePower = 0
+    private var powerThreshold = 4
 
     var score = 0; private set
     var combo = 0; private set
@@ -176,6 +196,8 @@ class Game(private val store: SettingsStore, private val host: GameHost) {
                 flash = 0.4f
                 celebrate(g.gapCenter)
                 if (score > highScore) { highScore = score; newHigh = true; store.highScore = score }
+                gatesSincePower++
+                if (!powerupActive && gatesSincePower >= powerThreshold) startPowerup()
             }
             // Collision while crossing.
             if (!g.hit && abs(g.z) < WALL_HALF_Z + BIRD_R) {
@@ -186,6 +208,65 @@ class Game(private val store: SettingsStore, private val host: GameHost) {
             if (g.z < DESPAWN_Z) gates.removeAt(i)
             i--
         }
+
+        updatePowerup(dt)
+    }
+
+    // ---------------------------------------------------------- power-up
+
+    private fun startPowerup() {
+        powerupActive = true
+        powerupTimer = POWER_SECS
+        dropTimer = 0f
+        gatesSincePower = 0
+        host.sfx(Sfx.POWER)
+        host.sfx(Sfx.HISCORE, 1.2f, 0.5f)
+        celebrate(birdY)
+    }
+
+    private fun updatePowerup(dt: Float) {
+        if (powerupActive) {
+            powerupTimer -= dt
+            dropTimer -= dt
+            if (dropTimer <= 0f) { emitDropping(); dropTimer = DROP_INTERVAL }
+            if (powerupTimer <= 0f) {
+                powerupActive = false
+                powerupTimer = 0f
+                powerThreshold = 3 + rng.nextInt(4) // next power-up after 3..6 walls
+            }
+        }
+        // Move droppings forward toward the oncoming walls; blast open any they reach.
+        var i = droppings.size - 1
+        while (i >= 0) {
+            val d = droppings[i]
+            d.vy += GRAVITY * 0.5f * dt
+            d.y += d.vy * dt
+            d.z += DROP_VZ * dt
+            var consumed = false
+            for (g in gates) {
+                if (!g.blasted && !g.passed && kotlin.math.abs(d.z - g.z) < 1.2f && d.z <= SPAWN_Z) {
+                    blastGate(g); consumed = true; break
+                }
+            }
+            if (consumed || d.z > SPAWN_Z || d.y < FLOOR - 3f) { droppings.removeAt(i); dropPool.addLast(d) }
+            i--
+        }
+    }
+
+    private fun emitDropping() {
+        val d = dropPool.removeFirstOrNull() ?: Dropping()
+        d.x = 0f; d.y = birdY - 0.2f; d.z = 0.2f; d.vy = -1.5f
+        droppings.add(d)
+        host.sfx(Sfx.CHIRP, 0.7f, 0.5f)
+    }
+
+    /** Open the next wall to double its gap (the power-up payoff). */
+    private fun blastGate(g: Gate) {
+        g.blasted = true
+        g.gapHalf = (g.gapHalf * 2f).coerceAtMost(CEIL - 0.4f)
+        g.flash = 1.6f
+        host.sfx(Sfx.ZAP)
+        celebrate(g.gapCenter)
     }
 
     private fun gateSpeed() = (9f + score * 0.22f).coerceAtMost(17f)
@@ -200,6 +281,8 @@ class Game(private val store: SettingsStore, private val host: GameHost) {
     private fun die() {
         state = GameState.DEAD
         deadTime = 0f
+        powerupActive = false
+        droppings.clear()
         shake = 12f
         flash = 1f
         host.sfx(Sfx.CRASH)
@@ -215,6 +298,10 @@ class Game(private val store: SettingsStore, private val host: GameHost) {
         birdY = 0f; birdVy = FLAP_V * 0.4f; birdTilt = 0f
         score = 0; combo = 0; newHigh = false
         gates.clear()
+        droppings.clear()
+        powerupActive = false; powerupTimer = 0f
+        gatesSincePower = 0
+        powerThreshold = 3 + rng.nextInt(4) // first power-up after 3..6 walls
         spawnTimer = 0.8f
         deadTime = 0f
         host.sfx(Sfx.START)
@@ -225,6 +312,8 @@ class Game(private val store: SettingsStore, private val host: GameHost) {
         state = GameState.TITLE
         birdY = 0f; birdVy = 0f
         gates.clear()
+        droppings.clear()
+        powerupActive = false; powerupTimer = 0f
         deadTime = 0f
         host.stopDrone()
     }

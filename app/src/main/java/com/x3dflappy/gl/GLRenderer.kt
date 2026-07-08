@@ -125,6 +125,10 @@ class GLRenderer(private val game: Game) : GLSurfaceView.Renderer {
             hsv(p.hue, 1f, 1f)
             fx.v(p.x, p.y, p.z, rgb[0], rgb[1], rgb[2], k)
         }
+        for (d in game.droppings) {
+            fx.v(d.x, d.y, d.z, 0.75f, 1f, 0.25f, 1f)
+            lines.line(d.x, d.y, d.z, d.x, d.y + 0.3f, d.z, 0.6f, 0.9f, 0.2f, 0.6f)
+        }
         buildBird(h)
     }
 
@@ -198,7 +202,8 @@ class GLRenderer(private val game: Game) : GLSurfaceView.Renderer {
         val rwt = floatArrayOf(0.85f, wl, -0.1f)
         val fin = floatArrayOf(0f, 0.5f, -0.35f)
         val bel = floatArrayOf(0f, -0.22f, -0.05f)
-        hsv((h + 0.15f) % 1f, 0.7f, 1f)
+        // Powered-up bird cycles color fast and blazes; normal bird is calmer.
+        if (game.powerupActive) hsv((h * 4f) % 1f, 1f, 1f) else hsv((h + 0.15f) % 1f, 0.7f, 1f)
         val r = rgb[0]; val g = rgb[1]; val b = rgb[2]
         birdLine(nose, tail, r, g, b); birdLine(nose, lwt, r, g, b); birdLine(nose, rwt, r, g, b)
         birdLine(tail, lwt, r, g, b); birdLine(tail, rwt, r, g, b); birdLine(lwt, rwt, r, g, b)
@@ -239,12 +244,20 @@ class GLRenderer(private val game: Game) : GLSurfaceView.Renderer {
         hsv(game.hue, 0.8f, 1f); val hr = rgb[0]; val hg = rgb[1]; val hb = rgb[2]
         when (game.state) {
             GameState.TITLE -> {
-                text("FLAPTRON", 320f, 150f, 5.5f, hr, hg, hb)
+                text("X3D FLAPPY", 320f, 150f, 4.6f, hr, hg, hb)
                 text("TAP TO FLAP", 320f, 250f, 2.4f, 1f, 1f, 1f, pulse)
                 if (game.highScore > 0) text("BEST ${game.highScore}", 320f, 300f, 1.8f, 0.6f, 1f, 0.7f)
             }
             GameState.PLAYING -> {
                 text("${game.score}", 320f, 70f, 5f, 1f, 1f, 1f)
+                if (game.powerupActive) {
+                    text("POWER", 320f, 128f, 3f, 1f, 1f, 0.35f, pulse)
+                    val frac = (game.powerupTimer / Game.POWER_SECS).coerceIn(0f, 1f)
+                    for (yy in 0..3) {
+                        hud.line(220f, 144f + yy, 0f, 420f, 144f + yy, 0f, 0.25f, 0.25f, 0.25f, 0.5f)
+                        hud.line(220f, 144f + yy, 0f, 220f + 200f * frac, 144f + yy, 0f, 0.4f, 1f, 0.4f, 1f)
+                    }
+                }
             }
             GameState.DEAD -> {
                 text("${game.score}", 320f, 90f, 6f, 1f, 0.5f, 0.4f)
