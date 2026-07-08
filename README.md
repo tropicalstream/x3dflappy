@@ -22,6 +22,22 @@ permissions, zero binary assets.
 - There is **no settings menu and no double-tap** — for obvious reasons, a
   double-tap would just be two flaps. Volume is the system volume (left temple
   pad on the glasses).
+- In the **city bonus** the bird flies itself and a tap **drops a bomb** instead.
+
+## Levels, lives & berries
+
+- Each **level is 10 walls** — a big countdown shows how many are left. You only
+  crash if the bird is *entirely* outside an opening; clipping the edge is safe.
+- You start with **3 lives**; a crash costs one and respawns you (game over at 0).
+- Two random walls per level hide a **neon berry** in the opening. **Every 10
+  berries earns an extra life.**
+- Every 10 walls leads to a **bonus level** (no damage), alternating and varied
+  each time:
+  - **Glide** — microgravity drift through clouds, eating a stream of berries.
+  - **City Raid** — the bird auto-flies over a city; tap to bomb the targets
+    (20 of them), each hit a berry.
+- After power-ups every few walls the bird drops bombs that blast the next walls
+  open to double size.
 
 ## What's on screen
 

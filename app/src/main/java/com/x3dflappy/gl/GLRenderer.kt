@@ -12,6 +12,7 @@ import java.nio.ByteOrder
 import java.nio.FloatBuffer
 import javax.microedition.khronos.egl.EGLConfig
 import javax.microedition.khronos.opengles.GL10
+import kotlin.math.abs
 import kotlin.math.cos
 import kotlin.math.max
 import kotlin.math.min
@@ -113,23 +114,92 @@ class GLRenderer(private val game: Game) : GLSurfaceView.Renderer {
     private fun buildScene() {
         lines.reset(); stars.reset(); fx.reset()
         val h = game.hue
-        buildTunnel(h)
-        for (g in game.gates) buildGate(g, h)
         for (s in game.stars) {
             val k = ((s.z - Game.CAM_Z) / (Game.SPAWN_Z - Game.CAM_Z)).coerceIn(0f, 1f)
             val b = 0.4f + 0.6f * (1f - k)
             stars.v(s.x, s.y, s.z, b * 0.7f, b * 0.9f, b, 0.9f)
+        }
+        when (game.state) {
+            GameState.BONUS_GLIDE -> { buildClouds(); buildBerries() }
+            GameState.BONUS_CITY -> { buildCity(h); buildDroppings() }
+            else -> {
+                buildTunnel(h)
+                for (g in game.gates) buildGate(g, h)
+                buildBerries()
+                buildDroppings()
+            }
         }
         for (p in game.particles) {
             val k = (p.life / p.maxLife).coerceIn(0f, 1f)
             hsv(p.hue, 1f, 1f)
             fx.v(p.x, p.y, p.z, rgb[0], rgb[1], rgb[2], k)
         }
+        // Bird blinks while briefly invulnerable after losing a life.
+        if (!(game.invulnTimer > 0f && (game.time * 12f).toInt() % 2 == 0)) buildBird(h)
+    }
+
+    private fun buildDroppings() {
         for (d in game.droppings) {
             fx.v(d.x, d.y, d.z, 0.75f, 1f, 0.25f, 1f)
             lines.line(d.x, d.y, d.z, d.x, d.y + 0.3f, d.z, 0.6f, 0.9f, 0.2f, 0.6f)
         }
-        buildBird(h)
+    }
+
+    private fun buildBerries() {
+        for (b in game.berries) {
+            hsv(b.hue, 0.9f, 1f)
+            val r = rgb[0]; val g = rgb[1]; val bl = rgb[2]
+            fx.v(b.x, b.y, b.z, r, g, bl, 1f)
+            val s = 0.3f + 0.06f * sin(game.time * 6f)
+            lines.line(b.x - s, b.y, b.z, b.x + s, b.y, b.z, r, g, bl, 0.8f)
+            lines.line(b.x, b.y - s, b.z, b.x, b.y + s, b.z, r, g, bl, 0.8f)
+            lines.line(b.x, b.y, b.z - s, b.x, b.y, b.z + s, r, g, bl, 0.5f)
+        }
+    }
+
+    private fun buildClouds() {
+        for (c in game.clouds) {
+            val depth = 1f - ((c.z - Game.CAM_Z) / Game.SPAWN_Z).coerceIn(0f, 1f)
+            val a = 0.15f + 0.25f * depth
+            for (k in 0 until 7) {
+                val ang = k * 0.8976f
+                val px = c.x + cos(ang) * c.r; val py = c.y + sin(ang) * c.r * 0.6f
+                lines.line(c.x, c.y, c.z, px, py, c.z, 0.6f, 0.7f, 0.95f, a)
+            }
+        }
+    }
+
+    private fun buildCity(h: Float) {
+        // Ground grid receding into the city.
+        val near = Game.CAM_Z + 1.5f; val far = Game.SPAWN_Z; val gy = Game.FLOOR
+        val scroll = (game.time * 8f) % 4f
+        var z = near + scroll
+        while (z <= far) {
+            val a = 0.4f * (1f - (z - near) / (far - near))
+            lines.line(-8f, gy, z, 8f, gy, z, 0.4f, 0.5f, 0.9f, a + 0.1f)
+            z += 4f
+        }
+        var x = -8f
+        while (x <= 8f) { lines.line(x, gy, near, x, gy, far, 0.3f, 0.4f, 0.8f, 0.25f); x += 2f }
+        // Buildings you bomb.
+        for (t in game.targets) {
+            if (t.z < near || t.z > far + 1f) continue
+            val col = if (t.hit) floatArrayOf(0.2f, 0.7f, 0.3f) else floatArrayOf(0.5f, 0.55f, 0.95f)
+            box(t.x - 0.7f, gy, t.z - 0.7f, t.x + 0.7f, t.topY, t.z + 0.7f, col[0], col[1], col[2])
+            if (!t.hit) {
+                val p = 0.6f + 0.4f * sin(game.time * 8f + t.z)
+                fx.v(t.x, t.topY + 0.2f, t.z, 1f, 0.3f * p, 0.2f, 1f) // red target beacon
+            }
+        }
+    }
+
+    private fun box(x0: Float, y0: Float, z0: Float, x1: Float, y1: Float, z1: Float, r: Float, g: Float, b: Float) {
+        // four vertical edges
+        lines.line(x0, y0, z0, x0, y1, z0, r, g, b, 0.8f); lines.line(x1, y0, z0, x1, y1, z0, r, g, b, 0.8f)
+        lines.line(x0, y0, z1, x0, y1, z1, r, g, b, 0.8f); lines.line(x1, y0, z1, x1, y1, z1, r, g, b, 0.8f)
+        // top rectangle
+        lines.line(x0, y1, z0, x1, y1, z0, r, g, b, 0.9f); lines.line(x0, y1, z1, x1, y1, z1, r, g, b, 0.9f)
+        lines.line(x0, y1, z0, x0, y1, z1, r, g, b, 0.9f); lines.line(x1, y1, z0, x1, y1, z1, r, g, b, 0.9f)
     }
 
     private fun buildTunnel(h: Float) {
@@ -175,19 +245,21 @@ class GLRenderer(private val game: Game) : GLSurfaceView.Renderer {
     }
 
     private fun panel(x0: Float, x1: Float, y0: Float, y1: Float, z: Float, r: Float, g: Float, b: Float) {
-        val a = 0.7f
+        val a = 0.75f
         lines.line(x0, y0, z, x1, y0, z, r, g, b, a)
         lines.line(x0, y1, z, x1, y1, z, r, g, b, a)
         lines.line(x0, y0, z, x0, y1, z, r, g, b, a)
         lines.line(x1, y0, z, x1, y1, z, r, g, b, a)
-        // interior grid lines
-        for (i in 1..2) {
-            val yy = y0 + (y1 - y0) * i / 3f
-            lines.line(x0, yy, z, x1, yy, z, r * 0.7f, g * 0.7f, b * 0.7f, 0.4f)
+        // Denser interior grid so the solid wall reads clearly against the gap.
+        val h = y1 - y0
+        val rows = (abs(h) / 0.55f).toInt().coerceIn(2, 9)
+        for (i in 1 until rows) {
+            val yy = y0 + h * i / rows
+            lines.line(x0, yy, z, x1, yy, z, r * 0.6f, g * 0.6f, b * 0.6f, 0.45f)
         }
-        for (i in 1..3) {
-            val xx = x0 + (x1 - x0) * i / 4f
-            lines.line(xx, y0, z, xx, y1, z, r * 0.7f, g * 0.7f, b * 0.7f, 0.4f)
+        for (i in 1..7) {
+            val xx = x0 + (x1 - x0) * i / 8f
+            lines.line(xx, y0, z, xx, y1, z, r * 0.6f, g * 0.6f, b * 0.6f, 0.4f)
         }
     }
 
@@ -249,24 +321,48 @@ class GLRenderer(private val game: Game) : GLSurfaceView.Renderer {
                 if (game.highScore > 0) text("BEST ${game.highScore}", 320f, 300f, 1.8f, 0.6f, 1f, 0.7f)
             }
             GameState.PLAYING -> {
-                text("${game.score}", 320f, 70f, 5f, 1f, 1f, 1f)
+                // Big wall countdown for the level.
+                text("${game.wallsRemaining}", 320f, 78f, 6f, 1f, 1f, 1f)
+                text("WALLS LEFT", 320f, 100f, 1.5f, 0.6f, 0.8f, 1f, 0.8f)
+                statusBar(hr, hg, hb)
                 if (game.powerupActive) {
-                    text("POWER", 320f, 128f, 3f, 1f, 1f, 0.35f, pulse)
+                    text("POWER", 320f, 150f, 2.6f, 1f, 1f, 0.35f, pulse)
                     val frac = (game.powerupTimer / Game.POWER_SECS).coerceIn(0f, 1f)
                     for (yy in 0..3) {
-                        hud.line(220f, 144f + yy, 0f, 420f, 144f + yy, 0f, 0.25f, 0.25f, 0.25f, 0.5f)
-                        hud.line(220f, 144f + yy, 0f, 220f + 200f * frac, 144f + yy, 0f, 0.4f, 1f, 0.4f, 1f)
+                        hud.line(240f, 166f + yy, 0f, 400f, 166f + yy, 0f, 0.25f, 0.25f, 0.25f, 0.5f)
+                        hud.line(240f, 166f + yy, 0f, 240f + 160f * frac, 166f + yy, 0f, 0.4f, 1f, 0.4f, 1f)
                     }
                 }
+            }
+            GameState.BONUS_GLIDE -> {
+                text("BONUS GLIDE", 320f, 60f, 2.8f, hr, hg, hb, pulse)
+                text("EAT THE BERRIES", 320f, 92f, 1.7f, 0.7f, 1f, 0.8f, 0.9f)
+                text("${game.bonusTimer.toInt() + 1}", 320f, 150f, 3.5f, 1f, 1f, 0.5f)
+                statusBar(hr, hg, hb)
+            }
+            GameState.BONUS_CITY -> {
+                text("BONUS RAID", 320f, 60f, 2.8f, hr, hg, hb, pulse)
+                text("TAP TO DROP ON TARGETS", 320f, 92f, 1.5f, 1f, 0.7f, 0.6f, 0.9f)
+                text("HITS ${game.cityHits} OF ${Game.CITY_TARGETS}", 320f, 150f, 2.2f, 1f, 0.9f, 0.4f)
+                statusBar(hr, hg, hb)
             }
             GameState.DEAD -> {
                 text("${game.score}", 320f, 90f, 6f, 1f, 0.5f, 0.4f)
                 text("GAME OVER", 320f, 180f, 3.2f, 1f, 0.35f, 0.3f)
                 text("BEST ${game.highScore}", 320f, 240f, 2.2f, 0.6f, 1f, 0.7f)
                 if (game.newHigh) text("NEW BEST!", 320f, 290f, 2.6f, 1f, 1f, 0.4f, pulse)
-                text("TAP", 320f, 380f, 2.2f, 1f, 1f, 1f, pulse * 0.9f)
+                text("BERRIES ${game.berryCount}", 320f, 330f, 1.8f, 0.7f, 1f, 0.6f)
+                text("TAP", 320f, 390f, 2.2f, 1f, 1f, 1f, pulse * 0.9f)
             }
         }
+    }
+
+    /** Level, lives and berries, shown in the corners during play/bonus. */
+    private fun statusBar(r: Float, g: Float, b: Float) {
+        text("LV ${game.level}", 18f, 44f, 1.9f, 0.7f, 0.85f, 1f, 1f, center = false)
+        val life = "LIVES ${game.lives}"
+        text(life, 624f - StrokeFont.width(life, 1.9f), 44f, 1.9f, 1f, 0.5f, 0.5f, 1f, center = false)
+        text("BERRY ${game.berryCount}", 18f, 464f, 1.7f, 0.7f, 1f, 0.6f, 1f, center = false)
     }
 
     // ------------------------------------------------------- gl helpers
