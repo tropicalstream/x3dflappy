@@ -1,8 +1,7 @@
 # X3D Flappy 🕊️⚡
 
 A **3D flappy-bird** for the **RayNeo X3 Pro**, rendered in **OpenGL ES 3.0** as
-glowing neon **vector graphics** in the surreal, color-drenched spirit of Jeff
-Minter (think *Tempest 2000* / *Space Giraffe*). A wireframe creature falls
+glowing neon **vector graphics** in the surreal. A wireframe creature falls
 through a color-cycling grid tunnel; **tap to flap** it up through the gaps in
 oncoming vector-wall gates. Everything is additive glow on black — which on the
 waveguide means the whole thing floats as light on the world.
