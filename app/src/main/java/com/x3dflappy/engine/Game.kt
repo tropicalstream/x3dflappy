@@ -7,7 +7,7 @@ import kotlin.math.cos
 import kotlin.math.sin
 import kotlin.random.Random
 
-enum class GameState { TITLE, PLAYING, BONUS_GLIDE, BONUS_CITY, DEAD }
+enum class GameState { TITLE, PLAYING, BONUS_GLIDE, BONUS_CITY, BONUS_GALAXIAN, DEAD }
 
 interface GameHost {
     fun sfx(id: Int, pitch: Float = 1f, vol: Float = 1f)
@@ -31,11 +31,14 @@ class Particle {
 
 class Star(var x: Float, var y: Float, var z: Float)
 
-/** Bird "dropping" — blasts walls open (power-up) or bombs targets (city bonus). */
+/** A bird projectile: blasts walls (power-up), bombs (city), or auto-shot bolts (galaxian). */
 class Dropping {
     var x = 0f; var y = 0f; var z = 0f
-    var vy = 0f
+    var vx = 0f; var vy = 0f; var vz = 0f
 }
+
+/** A swooping Galaxian-style foe; auto-shoot it for a berry. */
+class Enemy(var x: Float, var y: Float, var z: Float, val seed: Float, val hue: Float) { var alive = true }
 
 /** A collectible neon berry (10 = an extra life). */
 class Berry(var x: Float, var y: Float, var z: Float, val hue: Float) { var collected = false }
@@ -74,9 +77,13 @@ class Game(private val store: SettingsStore, private val host: GameHost) {
         const val BERRY_R = 0.55f
         const val GLIDE_SECS = 15f
         const val CITY_TARGETS = 20
+        const val GALAXY_ENEMIES = 20
+        const val NAV_V = 6.5f   // trackpad swipe nudge (glide / galaxian)
     }
 
     var state = GameState.TITLE; private set
+    var birdX = 0f; private set
+    var birdVx = 0f; private set
     var birdY = 0f; private set
     var birdVy = 0f; private set
     var birdTilt = 0f; private set
@@ -92,6 +99,7 @@ class Game(private val store: SettingsStore, private val host: GameHost) {
     val berries = ArrayList<Berry>()
     val clouds = ArrayList<Cloud>()
     val targets = ArrayList<Target>()
+    val enemies = ArrayList<Enemy>()
 
     var powerupActive = false; private set
     var powerupTimer = 0f; private set
@@ -108,18 +116,23 @@ class Game(private val store: SettingsStore, private val host: GameHost) {
     var berryCount = 0; private set
     var level = 1; private set
     var wallsThisLevel = 0; private set
-    val wallsRemaining get() = (LEVEL_WALLS - wallsThisLevel).coerceAtLeast(0)
+    var wallsTarget = LEVEL_WALLS; private set
+    val wallsRemaining get() = (wallsTarget - wallsThisLevel).coerceAtLeast(0)
     var bonusTimer = 0f; private set
     var cityHits = 0; private set
+    var galaxyKills = 0; private set
+    var bonusIndex = 0; private set // which bonus (1,2,3,...) — cycles the 3 types
     var invulnTimer = 0f; private set
 
     private var wallsSpawnedThisLevel = 0
     private var berryGateA = -1
     private var berryGateB = -1
-    private var bonusIndex = 0
     private var citySpawnTimer = 0f
     private var cityTargetsSpawned = 0
     private var berrySpawnTimer = 0f
+    private var enemiesSpawned = 0
+    private var enemySpawnTimer = 0f
+    private var fireTimer = 0f
 
     var time = 0f; private set
     val hue get() = (time * 0.07f) % 1f
@@ -149,8 +162,21 @@ class Game(private val store: SettingsStore, private val host: GameHost) {
             GameState.PLAYING -> flap()
             GameState.BONUS_GLIDE -> glideFlap()
             GameState.BONUS_CITY -> dropBomb()
+            GameState.BONUS_GALAXIAN -> fireBolt()
             GameState.DEAD -> if (deadTime > 0.7f) startGame()
         }
+    }
+
+    /** Trackpad direction (0 up,1 down,2 left,3 right) — navigates in the glide/galaxian bonus. */
+    fun swipe(dir: Int) {
+        if (state != GameState.BONUS_GLIDE && state != GameState.BONUS_GALAXIAN) return
+        when (dir) {
+            0 -> birdVy = NAV_V
+            1 -> birdVy = -NAV_V
+            2 -> birdVx = -NAV_V
+            3 -> birdVx = NAV_V
+        }
+        host.sfx(Sfx.FLAP, 1.2f, 0.5f)
     }
 
     private fun flap() {
@@ -175,9 +201,16 @@ class Game(private val store: SettingsStore, private val host: GameHost) {
 
     private fun dropBomb() {
         val d = dropPool.removeFirstOrNull() ?: Dropping()
-        d.x = 0f; d.y = birdY - 0.2f; d.z = 0.2f; d.vy = -2f
+        d.x = birdX; d.y = birdY - 0.2f; d.z = 0.2f; d.vx = 0f; d.vy = -2f; d.vz = 0f
         droppings.add(d)
         host.sfx(Sfx.THRUST, 0.8f, 0.7f)
+    }
+
+    private fun fireBolt() {
+        val d = dropPool.removeFirstOrNull() ?: Dropping()
+        d.x = birdX; d.y = birdY; d.z = 0.4f; d.vx = 0f; d.vy = 0f; d.vz = 28f
+        droppings.add(d)
+        host.sfx(Sfx.ZAP, 1.4f, 0.5f)
     }
 
     // -------------------------------------------------------------- update
@@ -193,10 +226,11 @@ class Game(private val store: SettingsStore, private val host: GameHost) {
         updateParticles(dt)
 
         when (state) {
-            GameState.TITLE -> { birdY = sin(time * 2f) * 0.5f; birdTilt = cos(time * 2f) * 12f }
+            GameState.TITLE -> { birdX = 0f; birdY = sin(time * 2f) * 0.5f; birdTilt = cos(time * 2f) * 12f }
             GameState.PLAYING -> updatePlaying(dt)
             GameState.BONUS_GLIDE -> updateGlide(dt)
             GameState.BONUS_CITY -> updateCity(dt)
+            GameState.BONUS_GALAXIAN -> updateGalaxian(dt)
             GameState.DEAD -> {
                 deadTime += dt
                 birdVy += GRAVITY * dt; birdY += birdVy * dt
@@ -220,7 +254,7 @@ class Game(private val store: SettingsStore, private val host: GameHost) {
         }
 
         val speed = gateSpeed()
-        if (wallsSpawnedThisLevel < LEVEL_WALLS) {
+        if (wallsSpawnedThisLevel < wallsTarget) {
             spawnTimer -= dt
             if (spawnTimer <= 0f) { spawnGate(); spawnTimer = 13f / speed }
         }
@@ -240,7 +274,7 @@ class Game(private val store: SettingsStore, private val host: GameHost) {
                 if (score > highScore) { highScore = score; newHigh = true; store.highScore = score }
                 gatesSincePower++
                 if (!powerupActive && gatesSincePower >= powerThreshold) startPowerup()
-                if (wallsThisLevel >= LEVEL_WALLS) { endRegularLevel(); return }
+                if (wallsThisLevel >= wallsTarget) { endRegularLevel(); return }
             }
             if (!gt.hit && invulnTimer <= 0f && abs(gt.z) < WALL_HALF_Z + BIRD_R) {
                 val top = gt.gapCenter + gt.gapHalf
@@ -301,7 +335,7 @@ class Game(private val store: SettingsStore, private val host: GameHost) {
         var i = droppings.size - 1
         while (i >= 0) {
             val d = droppings[i]
-            d.vy += GRAVITY * 0.5f * dt; d.y += d.vy * dt; d.z += DROP_VZ * dt
+            d.vy += GRAVITY * 0.5f * dt; d.x += d.vx * dt; d.y += d.vy * dt; d.z += d.vz * dt
             var consumed = false
             for (gt in gates) {
                 if (!gt.blasted && !gt.passed && abs(d.z - gt.z) < 1.2f && d.z <= SPAWN_Z) { blastGate(gt); consumed = true; break }
@@ -313,7 +347,7 @@ class Game(private val store: SettingsStore, private val host: GameHost) {
 
     private fun emitDropping() {
         val d = dropPool.removeFirstOrNull() ?: Dropping()
-        d.x = 0f; d.y = birdY - 0.2f; d.z = 0.2f; d.vy = -1.5f
+        d.x = 0f; d.y = birdY - 0.2f; d.z = 0.2f; d.vx = 0f; d.vy = -1.5f; d.vz = DROP_VZ
         droppings.add(d); host.sfx(Sfx.CHIRP, 0.7f, 0.5f)
     }
 
@@ -327,34 +361,39 @@ class Game(private val store: SettingsStore, private val host: GameHost) {
 
     private fun startGlide() {
         state = GameState.BONUS_GLIDE
-        bonusTimer = GLIDE_SECS
+        bonusTimer = GLIDE_SECS + remixTier() * 3f
         berrySpawnTimer = 0f
         berries.clear(); clouds.clear(); droppings.clear()
-        birdY = 0f; birdVy = 2f
+        birdX = 0f; birdVx = 0f; birdY = 0f; birdVy = 2f
         repeat(16) { clouds.add(Cloud(rng.nextFloat() * 10f - 5f, rng.nextFloat() * 7f - 3.5f, rng.nextFloat() * (SPAWN_Z - 2f) + 2f, 0.8f + rng.nextFloat() * 1.6f)) }
         host.sfx(Sfx.POWER, 0.9f); host.startDrone()
     }
 
     private fun updateGlide(dt: Float) {
         bonusTimer -= dt
-        // Microgravity glide.
+        // Microgravity glide; trackpad swipes thrust in all four directions.
         birdVy += GRAVITY * 0.12f * dt
-        birdY += birdVy * dt
+        birdX += birdVx * dt; birdY += birdVy * dt
+        birdVx *= 0.94f; birdVy *= 0.985f
         birdTilt = (birdVy * 3f).coerceIn(-30f, 30f)
-        if (birdY + BIRD_R > CEIL) { birdY = CEIL - BIRD_R; birdVy = 0f }
-        if (birdY - BIRD_R < FLOOR) { birdY = FLOOR + BIRD_R; birdVy = 0f }
+        birdX = birdX.coerceIn(-4.2f, 4.2f)
+        if (birdY + BIRD_R > CEIL) { birdY = CEIL - BIRD_R; birdVy = minOf(birdVy, 0f) }
+        if (birdY - BIRD_R < FLOOR) { birdY = FLOOR + BIRD_R; birdVy = maxOf(birdVy, 0f) }
 
-        val speed = 7f
+        val speed = 7f + remixTier() * 1.2f
         berrySpawnTimer -= dt
         if (berrySpawnTimer <= 0f && bonusTimer > 2f) {
-            berries.add(Berry(0f, rng.nextFloat() * 6f - 3f, SPAWN_Z, rng.nextFloat()))
-            berrySpawnTimer = 0.55f + rng.nextFloat() * 0.25f
+            // Berries scattered across the sky so you must steer to them.
+            berries.add(Berry(rng.nextFloat() * 8f - 4f, rng.nextFloat() * 6f - 3f, SPAWN_Z, rng.nextFloat()))
+            berrySpawnTimer = (0.5f - remixTier() * 0.05f).coerceAtLeast(0.25f) + rng.nextFloat() * 0.2f
         }
         var i = berries.size - 1
         while (i >= 0) {
             val b = berries[i]
             b.z -= speed * dt
-            if (!b.collected && abs(b.z) < 1.2f && abs(birdY - b.y) < BIRD_R + BERRY_R) { b.collected = true; collectBerry(b.x, b.y, b.z) }
+            if (!b.collected && abs(b.z) < 1.3f && abs(birdX - b.x) < BIRD_R + BERRY_R && abs(birdY - b.y) < BIRD_R + BERRY_R) {
+                b.collected = true; collectBerry(b.x, b.y, b.z)
+            }
             if (b.collected || b.z < DESPAWN_Z) berries.removeAt(i)
             i--
         }
@@ -362,13 +401,74 @@ class Game(private val store: SettingsStore, private val host: GameHost) {
         if (bonusTimer <= 0f) nextRegularLevel()
     }
 
+    // --------------------------------------------------- bonus: galaxian
+
+    private fun startGalaxian() {
+        state = GameState.BONUS_GALAXIAN
+        enemies.clear(); droppings.clear(); berries.clear()
+        enemiesSpawned = 0; enemySpawnTimer = 0.4f; fireTimer = 0f; galaxyKills = 0
+        birdX = 0f; birdVx = 0f; birdY = -1.5f; birdVy = 0f
+        host.sfx(Sfx.POWER, 1.3f); host.startDrone()
+    }
+
+    private fun updateGalaxian(dt: Float) {
+        // Swipe-steered bird with a little inertia; damped to feel controllable.
+        birdX += birdVx * dt; birdY += birdVy * dt
+        birdVx *= 0.9f; birdVy *= 0.9f
+        birdX = birdX.coerceIn(-4.2f, 4.2f); birdY = birdY.coerceIn(FLOOR + 0.5f, CEIL - 0.5f)
+        birdTilt = (birdVx * -3f).coerceIn(-25f, 25f)
+
+        val total = GALAXY_ENEMIES + remixTier() * 4
+        if (enemiesSpawned < total) {
+            enemySpawnTimer -= dt
+            if (enemySpawnTimer <= 0f) {
+                enemies.add(Enemy(rng.nextFloat() * 7f - 3.5f, 2.5f + rng.nextFloat() * 1.5f, SPAWN_Z, rng.nextFloat() * 6.28f, rng.nextFloat()))
+                enemiesSpawned++
+                enemySpawnTimer = (0.7f - remixTier() * 0.06f).coerceAtLeast(0.35f)
+            }
+        }
+        val eSpeed = 9f + remixTier() * 1.5f
+        var e = enemies.size - 1
+        while (e >= 0) {
+            val en = enemies[e]
+            en.z -= eSpeed * dt
+            // swoop: sinusoidal descent as it approaches
+            en.x += sin(time * 2f + en.seed) * dt * 1.6f
+            en.y += (cos(time * 1.5f + en.seed) - 0.4f) * dt * 1.2f
+            if (en.z < DESPAWN_Z) enemies.removeAt(e)
+            e--
+        }
+
+        // Auto-fire at the nearest live enemy ahead.
+        fireTimer -= dt
+        if (fireTimer <= 0f && enemies.isNotEmpty()) { fireBolt(); fireTimer = 0.28f }
+
+        var i = droppings.size - 1
+        while (i >= 0) {
+            val d = droppings[i]
+            d.z += d.vz * dt
+            var consumed = false
+            for (en in enemies) {
+                if (en.alive && abs(d.z - en.z) < 1.4f && abs(d.x - en.x) < 0.9f && abs(d.y - en.y) < 0.9f) {
+                    en.alive = false; galaxyKills++; collectBerry(en.x, en.y, en.z); consumed = true; break
+                }
+            }
+            if (consumed) enemies.removeAll { !it.alive }
+            if (consumed || d.z > SPAWN_Z + 2f) { droppings.removeAt(i); dropPool.addLast(d) }
+            i--
+        }
+        if (enemiesSpawned >= total && enemies.isEmpty()) nextRegularLevel()
+    }
+
+    private fun remixTier() = ((bonusIndex - 1) / 3).coerceAtLeast(0)
+
     // ------------------------------------------------------- bonus: city
 
     private fun startCity() {
         state = GameState.BONUS_CITY
         targets.clear(); droppings.clear(); berries.clear()
         cityTargetsSpawned = 0; citySpawnTimer = 0.5f; cityHits = 0
-        birdY = 1.5f; birdVy = 0f
+        birdX = 0f; birdVx = 0f; birdY = 1.5f; birdVy = 0f
         host.sfx(Sfx.POWER, 1.1f); host.startDrone()
     }
 
@@ -409,7 +509,12 @@ class Game(private val store: SettingsStore, private val host: GameHost) {
         gates.clear(); berries.clear(); droppings.clear(); powerupActive = false
         host.sfx(Sfx.HISCORE, 1f, 0.8f)
         bonusIndex++
-        if (bonusIndex % 2 == 1) startGlide() else startCity()
+        // Cycle the three bonus types; each recurrence is a remix (see remixTier).
+        when ((bonusIndex - 1) % 3) {
+            0 -> startGlide()
+            1 -> startCity()
+            else -> startGalaxian()
+        }
     }
 
     private fun nextRegularLevel() {
@@ -420,20 +525,22 @@ class Game(private val store: SettingsStore, private val host: GameHost) {
 
     private fun beginRegularLevel() {
         state = GameState.PLAYING
-        gates.clear(); berries.clear(); droppings.clear(); clouds.clear(); targets.clear()
+        gates.clear(); berries.clear(); droppings.clear(); clouds.clear(); targets.clear(); enemies.clear()
+        // 10 walls for level 1, then one more for each subsequent level.
+        wallsTarget = LEVEL_WALLS + (level - 1)
         wallsThisLevel = 0; wallsSpawnedThisLevel = 0
         pickBerryGates()
         powerupActive = false; powerupTimer = 0f; gatesSincePower = 0
         powerThreshold = 3 + rng.nextInt(4)
-        birdY = 0f; birdVy = FLAP_V * 0.4f; birdTilt = 0f
+        birdX = 0f; birdVx = 0f; birdY = 0f; birdVy = FLAP_V * 0.4f; birdTilt = 0f
         invulnTimer = 1.0f
         spawnTimer = 0.8f
         host.startDrone()
     }
 
     private fun pickBerryGates() {
-        berryGateA = rng.nextInt(LEVEL_WALLS)
-        do { berryGateB = rng.nextInt(LEVEL_WALLS) } while (berryGateB == berryGateA)
+        berryGateA = rng.nextInt(wallsTarget)
+        do { berryGateB = rng.nextInt(wallsTarget) } while (berryGateB == berryGateA)
     }
 
     private fun startGame() {

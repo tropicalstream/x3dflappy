@@ -26,18 +26,27 @@ permissions, zero binary assets.
 
 ## Levels, lives & berries
 
-- Each **level is 10 walls** — a big countdown shows how many are left. You only
-  crash if the bird is *entirely* outside an opening; clipping the edge is safe.
+- **Level 1 is 10 walls, and each level adds one more** (11, 12, 13, …). A big
+  countdown shows how many are left. You only crash if the bird is *entirely*
+  outside an opening; clipping the edge is safe.
 - You start with **3 lives**; a crash costs one and respawns you (game over at 0).
 - Two random walls per level hide a **neon berry** in the opening. **Every 10
   berries earns an extra life.**
-- Every 10 walls leads to a **bonus level** (no damage), alternating and varied
-  each time:
-  - **Glide** — microgravity drift through clouds, eating a stream of berries.
-  - **City Raid** — the bird auto-flies over a city; tap to bomb the targets
-    (20 of them), each hit a berry.
-- After power-ups every few walls the bird drops bombs that blast the next walls
-  open to double size.
+- After power-ups (every few walls) the bird drops bombs that blast the next
+  walls open to double size.
+
+## Bonus levels
+
+Clearing a level drops you into a **bonus level** (the bird can't be hurt).
+There are **three base types**, cycled and remixed (they get bigger/faster each
+time around, so the bonus levels keep varying):
+
+1. **Glide** — microgravity drift; **swipe the trackpad up/down/left/right** to
+   steer through clouds and sweep up berries scattered across the sky.
+2. **City Raid** — the bird auto-flies over a neon city; **tap to drop bombs** on
+   the 20 targets, each hit a berry.
+3. **Galaxian** — a neon shooting gallery: the bird **auto-fires**, you **swipe
+   to steer**, and swooping foes become berries when you shoot them down.
 
 ## What's on screen
 

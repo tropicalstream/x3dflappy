@@ -122,6 +122,7 @@ class GLRenderer(private val game: Game) : GLSurfaceView.Renderer {
         when (game.state) {
             GameState.BONUS_GLIDE -> { buildClouds(); buildBerries() }
             GameState.BONUS_CITY -> { buildCity(h); buildDroppings() }
+            GameState.BONUS_GALAXIAN -> { buildGalaxian(h); buildBolts() }
             else -> {
                 buildTunnel(h)
                 for (g in game.gates) buildGate(g, h)
@@ -202,6 +203,31 @@ class GLRenderer(private val game: Game) : GLSurfaceView.Renderer {
         lines.line(x0, y1, z0, x0, y1, z1, r, g, b, 0.9f); lines.line(x1, y1, z0, x1, y1, z1, r, g, b, 0.9f)
     }
 
+    private fun buildGalaxian(h: Float) {
+        buildTunnel((h + 0.4f) % 1f) // starry tunnel backdrop
+        for (en in game.enemies) {
+            if (!en.alive) continue
+            hsv(en.hue, 0.9f, 1f)
+            val r = rgb[0]; val g = rgb[1]; val b = rgb[2]
+            val s = 0.6f
+            // little swooping neon ship (diamond + swept wings)
+            lines.line(en.x, en.y + s, en.z, en.x + s, en.y, en.z, r, g, b, 0.9f)
+            lines.line(en.x + s, en.y, en.z, en.x, en.y - s, en.z, r, g, b, 0.9f)
+            lines.line(en.x, en.y - s, en.z, en.x - s, en.y, en.z, r, g, b, 0.9f)
+            lines.line(en.x - s, en.y, en.z, en.x, en.y + s, en.z, r, g, b, 0.9f)
+            lines.line(en.x - s, en.y, en.z, en.x - s * 1.6f, en.y - s * 0.6f, en.z, r, g, b, 0.7f)
+            lines.line(en.x + s, en.y, en.z, en.x + s * 1.6f, en.y - s * 0.6f, en.z, r, g, b, 0.7f)
+            fx.v(en.x, en.y, en.z, 1f, 1f, 1f, 1f)
+        }
+    }
+
+    private fun buildBolts() {
+        for (d in game.droppings) {
+            lines.line(d.x, d.y, d.z, d.x, d.y, d.z + 0.9f, 0.5f, 1f, 1f, 0.9f)
+            fx.v(d.x, d.y, d.z + 0.9f, 0.7f, 1f, 1f, 1f)
+        }
+    }
+
     private fun buildTunnel(h: Float) {
         val floorY = Game.FLOOR - 0.1f; val ceilY = Game.CEIL + 0.1f
         val near = Game.CAM_Z + 1.5f; val far = Game.SPAWN_Z
@@ -265,7 +291,7 @@ class GLRenderer(private val game: Game) : GLSurfaceView.Renderer {
 
     private fun buildBird(h: Float) {
         Matrix.setIdentityM(model, 0)
-        Matrix.translateM(model, 0, 0f, game.birdY, 0f)
+        Matrix.translateM(model, 0, game.birdX, game.birdY, 0f)
         Matrix.rotateM(model, 0, game.birdTilt, 1f, 0f, 0f)
         val wl = sin(game.wingPhase) * 0.28f
         val nose = floatArrayOf(0f, 0f, 0.55f)
@@ -344,6 +370,12 @@ class GLRenderer(private val game: Game) : GLSurfaceView.Renderer {
                 text("BONUS RAID", 320f, 60f, 2.8f, hr, hg, hb, pulse)
                 text("TAP TO DROP ON TARGETS", 320f, 92f, 1.5f, 1f, 0.7f, 0.6f, 0.9f)
                 text("HITS ${game.cityHits} OF ${Game.CITY_TARGETS}", 320f, 150f, 2.2f, 1f, 0.9f, 0.4f)
+                statusBar(hr, hg, hb)
+            }
+            GameState.BONUS_GALAXIAN -> {
+                text("BONUS GALAXIAN", 320f, 60f, 2.6f, hr, hg, hb, pulse)
+                text("SWIPE TO STEER · AUTO FIRE", 320f, 92f, 1.5f, 0.7f, 1f, 1f, 0.9f)
+                text("SHOT DOWN ${game.galaxyKills}", 320f, 150f, 2.2f, 1f, 0.9f, 0.4f)
                 statusBar(hr, hg, hb)
             }
             GameState.DEAD -> {

@@ -15,11 +15,13 @@ import com.x3dflappy.audio.Sfx
 import com.x3dflappy.engine.Game
 import com.x3dflappy.engine.GameHost
 import com.x3dflappy.gl.GLRenderer
+import kotlin.math.max
 
 /**
- * X3DFlappy. The only control is TAP = flap. There is deliberately no settings
- * menu (and so no double-tap gesture) — a double-tap would just be two flaps.
- * The temple click arrives as a KEY event; touchscreen taps work too.
+ * X3DFlappy. Tap = flap (and drop/shoot in the relevant bonuses). In the glide
+ * and Galaxian bonuses a trackpad SWIPE steers the bird up/down/left/right.
+ * There is deliberately no settings menu / double-tap. The temple click arrives
+ * as a KEY event; touchscreen taps work too.
  */
 class MainActivity : Activity(), GameHost {
 
@@ -31,6 +33,9 @@ class MainActivity : Activity(), GameHost {
 
     // Guard so one physical tap (which can arrive as both KEY and touch) flaps once.
     private var lastTap = 0L
+    private var downX = 0f
+    private var downY = 0f
+    private var downT = 0L
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -79,9 +84,23 @@ class MainActivity : Activity(), GameHost {
     }
 
     override fun dispatchTouchEvent(ev: MotionEvent): Boolean {
-        // Ignore the left temple volume pad; any real tap flaps.
+        // Ignore the left temple volume pad.
         if (ev.device?.name?.contains("cyttsp6", ignoreCase = true) == true) return true
-        if (ev.actionMasked == MotionEvent.ACTION_DOWN) flap()
+        when (ev.actionMasked) {
+            MotionEvent.ACTION_DOWN -> { downX = ev.x; downY = ev.y; downT = SystemClock.uptimeMillis() }
+            MotionEvent.ACTION_UP -> {
+                val dx = ev.x - downX; val dy = ev.y - downY
+                val dist = kotlin.math.hypot(dx, dy)
+                val thresh = max(48f, 0.09f * resources.displayMetrics.widthPixels)
+                if (dist >= thresh) {
+                    // Swipe: navigate (only the glide/galaxian bonuses use it).
+                    val dir = if (kotlin.math.abs(dx) >= kotlin.math.abs(dy)) { if (dx > 0) 3 else 2 } else { if (dy < 0) 0 else 1 }
+                    glView.queueEvent { game.swipe(dir) }
+                } else if (SystemClock.uptimeMillis() - downT <= 320) {
+                    flap()
+                }
+            }
+        }
         return true
     }
 
