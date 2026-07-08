@@ -94,7 +94,8 @@ class MainActivity : Activity(), GameHost {
                 val thresh = max(48f, 0.09f * resources.displayMetrics.widthPixels)
                 if (dist >= thresh) {
                     // Swipe: navigate (only the glide/galaxian bonuses use it).
-                    val dir = if (kotlin.math.abs(dx) >= kotlin.math.abs(dy)) { if (dx > 0) 3 else 2 } else { if (dy < 0) 0 else 1 }
+                    // Horizontal is inverted vs the X3 trackpad's axis (vertical is not).
+                    val dir = if (kotlin.math.abs(dx) >= kotlin.math.abs(dy)) { if (dx > 0) 2 else 3 } else { if (dy < 0) 0 else 1 }
                     glView.queueEvent { game.swipe(dir) }
                 } else if (SystemClock.uptimeMillis() - downT <= 320) {
                     flap()
